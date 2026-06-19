@@ -5,14 +5,6 @@ import re
 
 from datetime import datetime
 
-from presidio_analyzer import (
-    AnalyzerEngine
-)
-
-from presidio_anonymizer import (
-    AnonymizerEngine
-)
-
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
@@ -24,10 +16,21 @@ from reportlab.lib.styles import (
 )
 
 
-# --------------------------------
-# PDF TEXT EXTRACTION
-# --------------------------------
+# -------------------------
+# PAGE
+# -------------------------
 
+st.set_page_config(
+    page_title="Medical PDF Deidentifier",
+    layout="wide"
+)
+
+
+# -------------------------
+# PDF EXTRACTION
+# -------------------------
+
+@st.cache_data
 def extract_text(pdf):
 
     doc = fitz.open(pdf)
@@ -45,9 +48,9 @@ def extract_text(pdf):
     return text
 
 
-# --------------------------------
-# AGE → AGE GROUP
-# --------------------------------
+# -------------------------
+# AGE GROUP
+# -------------------------
 
 def convert_age(match):
 
@@ -59,25 +62,20 @@ def convert_age(match):
         age // 10
     ) * 10
 
-    end = (
-        start + 9
-    )
+    end = start + 9
 
     return (
         f"Age Group: {start}-{end}"
     )
 
 
-# --------------------------------
-# DATE → MONTH YEAR
-# --------------------------------
+# -------------------------
+# DATE
+# -------------------------
 
 def convert_date(match):
 
-    txt = (
-        match.group(0)
-        .strip()
-    )
+    txt = match.group(0)
 
     txt = re.sub(
 
@@ -107,7 +105,6 @@ def convert_date(match):
 
     ]
 
-
     for f in formats:
 
         try:
@@ -128,113 +125,80 @@ def convert_date(match):
     return "[DATE]"
 
 
-# --------------------------------
-# DEIDENTIFICATION
-# --------------------------------
+# -------------------------
+# DEIDENTIFY
+# -------------------------
 
+@st.cache_data
 def deidentify(text):
-
 
     rules = [
 
         (
-
             r'Name\s*:.*',
-
             'Name : [PATIENT]'
-
         ),
 
         (
-
             r'Patient.*',
-
             'Patient : [PATIENT]'
-
         ),
 
         (
-
             r'Dr\.?\s*[A-Za-z .]+',
-
             '[DOCTOR]'
-
         ),
 
         (
-
             r'Consultant Pathologist',
-
             '[ROLE]'
-
         ),
 
         (
-
             r'Kauvery Hospital.*',
-
             '[HOSPITAL]'
-
         ),
 
         (
-
             r'Trichy',
-
             '[CITY]'
-
         ),
 
         (
-
             r'Bangalore',
-
             '[CITY]'
-
         ),
 
         (
-
             r'Case ID.*',
-
             'Case ID : [ID]'
-
         ),
 
         (
-
             r'Sample ID.*',
-
             'Sample ID : [ID]'
-
         ),
 
         (
-
             r'Order ID.*',
-
             'Order ID : [ID]'
-
         ),
 
         (
-
             r'Ref By.*',
-
             'Ref By : [REDACTED]'
-
         )
 
     ]
 
 
-    for pattern, replacement in rules:
+    for p, r in rules:
 
         text = re.sub(
 
-            pattern,
+            p,
 
-            replacement,
+            r,
 
             text,
 
@@ -242,8 +206,6 @@ def deidentify(text):
 
         )
 
-
-    # AGE GROUP
 
     text = re.sub(
 
@@ -258,8 +220,6 @@ def deidentify(text):
     )
 
 
-    # DATE
-
     text = re.sub(
 
         r'\d{1,2}(st|nd|rd|th)?[\s/-]+[A-Za-z0-9]+[\s/-]+\d{4}',
@@ -272,35 +232,12 @@ def deidentify(text):
 
     )
 
-
-    analyzer = (
-        AnalyzerEngine()
-    )
-
-    anonymizer = (
-        AnonymizerEngine()
-    )
-
-    result = analyzer.analyze(
-
-        text=text,
-
-        language="en"
-
-    )
-
-    return anonymizer.anonymize(
-
-        text,
-
-        result
-
-    ).text
+    return text
 
 
-# --------------------------------
-# PDF EXPORT
-# --------------------------------
+# -------------------------
+# CREATE PDF
+# -------------------------
 
 def create_pdf(text):
 
@@ -316,17 +253,12 @@ def create_pdf(text):
 
 
     doc = SimpleDocTemplate(
-
         path
-
     )
 
     styles = (
-
         getSampleStyleSheet()
-
     )
-
 
     story = []
 
@@ -347,11 +279,8 @@ def create_pdf(text):
     story.append(
 
         Spacer(
-
             1,
-
             20
-
         )
 
     )
@@ -375,33 +304,19 @@ def create_pdf(text):
 
 
     doc.build(
-
         story
-
     )
 
     return path
 
 
-# --------------------------------
-# STREAMLIT UI
-# --------------------------------
-
-st.set_page_config(
-
-    page_title="Medical PDF Deidentifier",
-
-    layout="wide"
-
-)
-
+# -------------------------
+# UI
+# -------------------------
 
 st.title(
-
     "Medical PDF Deidentification"
-
 )
-
 
 uploaded = st.file_uploader(
 
@@ -414,7 +329,6 @@ uploaded = st.file_uploader(
 
 if uploaded:
 
-
     with tempfile.NamedTemporaryFile(
 
         delete=False,
@@ -424,39 +338,32 @@ if uploaded:
     ) as f:
 
         f.write(
-
             uploaded.read()
-
         )
 
         input_pdf = f.name
 
 
-    raw = extract_text(
+    with st.spinner(
+        "Processing..."
+    ):
 
-        input_pdf
+        raw = extract_text(
+            input_pdf
+        )
 
-    )
-
-
-    clean = deidentify(
-
-        raw
-
-    )
+        clean = deidentify(
+            raw
+        )
 
 
     st.success(
-
-        "Deidentification Completed"
-
+        "Completed"
     )
 
 
     st.subheader(
-
         "Preview"
-
     )
 
 
@@ -464,36 +371,42 @@ if uploaded:
 
         "",
 
-        clean,
+        clean[:5000],
 
-        height=350
-
-    )
-
-
-    output = create_pdf(
-
-        clean
+        height=250
 
     )
 
 
-    with open(
+    if st.button(
 
-        output,
+        "Generate PDF"
 
-        "rb"
+    ):
 
-    ) as f:
+        output = create_pdf(
 
-        st.download_button(
-
-            label="Download Deidentified PDF",
-
-            data=f.read(),
-
-            file_name="deidentified_report.pdf",
-
-            mime="application/pdf"
+            clean
 
         )
+
+
+        with open(
+
+            output,
+
+            "rb"
+
+        ) as f:
+
+            st.download_button(
+
+                "Download PDF",
+
+                f.read(),
+
+                "deidentified_report.pdf",
+
+                "application/pdf"
+
+            )
